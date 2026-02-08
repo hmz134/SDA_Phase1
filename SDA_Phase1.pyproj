@@ -4,7 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>64233c38-63d2-4a98-830c-902610296d0c</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>data_process.py</StartupFile>
+    <StartupFile>main.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -21,11 +21,18 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="data_process.py" />
+    <Compile Include="prepare_data.py" />
+    <Compile Include="main.py" />
     <Compile Include="Modules\dataProcessor.py" />
+    <Compile Include="Modules\data_loader.py" />
+    <Compile Include="Modules\dashboard.py" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Modules\" />
+    <Folder Include="data\" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="gdp_with_continent_filled.xlsx" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in
