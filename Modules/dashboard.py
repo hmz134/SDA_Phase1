@@ -21,7 +21,15 @@ def make_charts(region_data, year_data):
     plt.title("gdp by region")
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig("region_gdp.png")
+    plt.savefig("region_gdp_bar.png")
+    plt.close()
+
+    # region pie chart
+    plt.figure()
+    plt.pie(region_data.values(), labels=region_data.keys(), autopct='%1.1f%%')
+    plt.title("gdp distribution by region")
+    plt.tight_layout()
+    plt.savefig("region_gdp_pie.png")
     plt.close()
 
     # yearly line chart
@@ -31,8 +39,18 @@ def make_charts(region_data, year_data):
     plt.xlabel("year")
     plt.ylabel("gdp")
     plt.tight_layout()
-    plt.savefig("year_gdp.png")
+    plt.savefig("year_gdp_line.png")
+    plt.close()
+
+    # yearly bar chart
+    plt.figure()
+    plt.bar(year_data.keys(), year_data.values())
+    plt.title("gdp trend by year")
+    plt.xlabel("year")
+    plt.ylabel("gdp")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig("year_gdp_bar.png")
     plt.close()
 
     print("\ncharts saved")
-
