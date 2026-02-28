@@ -21,6 +21,9 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="core\contracts.py" />
+    <Compile Include="core\engine.py" />
+    <Compile Include="core\__init__.py" />
     <Compile Include="prepare_data.py" />
     <Compile Include="main.py" />
     <Compile Include="Modules\dataProcessor.py" />
@@ -30,9 +33,11 @@
   <ItemGroup>
     <Folder Include="Modules\" />
     <Folder Include="data\" />
+    <Folder Include="core\" />
+    <Folder Include="plugins\" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="gdp_with_continent_filled.xlsx" />
+    <Content Include="data\gdp_with_continent_filled.xlsx" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in

@@ -1,6 +1,9 @@
 {
-  "region": "Europe",
+  "input": "csv",
+  "output": "console",
+  "continent": "Asia",
   "year": 2020,
-  "operation": "sum",
-  "output": "dashboard"
+  "year_range": [ 2010, 2020 ],
+  "decline_years": 5,
+  "operation": "sum"
 }
