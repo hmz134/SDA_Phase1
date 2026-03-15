@@ -1,188 +1,84 @@
-import pandas as pd
-from core.contracts import DataSink
+import hashlib
+from collections import deque
+from functools import reduce
 
 
-class TransformationEngine:
-    def __init__(self, sink: DataSink, cfg: dict):
-        self.sink = sink
+# pure stateless - generates pbkdf2 signature for a given value
+def generate_signature(raw_value_str: str, key: str, iterations: int, algorithm: str = 'sha256') -> str:
+    password_bytes = key.encode('utf-8')
+    salt_bytes = raw_value_str.encode('utf-8')
+    hash_bytes = hashlib.pbkdf2_hmac(algorithm, password_bytes, salt_bytes, iterations)
+    return hash_bytes.hex()
+
+
+# value must be rounded to 2 decimals - same way the signature was originally made
+def verify_packet(packet: dict, key: str, iterations: int, algorithm: str = 'sha256') -> bool:
+    raw_value_str = f"{float(packet['metric_value']):.2f}"
+    expected = generate_signature(raw_value_str, key, iterations, algorithm)
+    return expected == packet.get('security_hash', '')
+
+
+# pure functional core - sliding window average
+def compute_average(window: deque) -> float:
+    if not window:
+        return 0.0
+    total = reduce(lambda acc, x: acc + x, window)
+    return round(total / len(window), 4)
+
+
+# scatter worker - pulls from raw queue, drops anything that fails verification
+class CoreWorker:
+    def __init__(self, raw_queue, verified_queue, cfg):
+        self.raw_queue = raw_queue
+        self.verified_queue = verified_queue
         self.cfg = cfg
 
-    def execute(self, raw_data: list) -> None:
-        df = pd.DataFrame(raw_data)
+    def run(self):
+        stateless = self.cfg['processing']['stateless_tasks']
+        key = stateless['secret_key']
+        iterations = stateless['iterations']
+        hash_name = stateless.get('hash_name', 'sha256')
 
-        df['Year'] = pd.to_numeric(df['Year'], errors='coerce')
-        df['Value'] = pd.to_numeric(df['Value'], errors='coerce')
-        df = df.dropna(subset=['Year', 'Value'])
-        df['Year'] = df['Year'].astype(int)
+        while True:
+            packet = self.raw_queue.get()
 
-        continent = self.cfg.get('continent')
-        year = self.cfg.get('year')
-        year_start = self.cfg.get('year_range', [2000, 2020])[0]
-        year_end = self.cfg.get('year_range', [2000, 2020])[1]
-        decline_years = self.cfg.get('decline_years', 5)
+            if packet is None:  # kill signal - pass it along and stop
+                self.verified_queue.put(None)
+                break
 
-        results = []
-
-        # top 10 countries by gdp for continent and year
-        results.append({
-            'type': 'top10',
-            'label': f'top 10 countries by gdp in {continent} ({year})',
-            'data': top_10(df, continent, year)
-        })
-
-        # bottom 10 countries by gdp for continent and year
-        results.append({
-            'type': 'bottom10',
-            'label': f'bottom 10 countries by gdp in {continent} ({year})',
-            'data': bottom_10(df, continent, year)
-        })
-
-        # gdp growth rate per country in continent for date range
-        results.append({
-            'type': 'growth_rate',
-            'label': f'gdp growth rate in {continent} ({year_start}-{year_end})',
-            'data': growth_rate(df, continent, year_start, year_end)
-        })
-
-        # average gdp by continent for date range
-        results.append({
-            'type': 'avg_by_continent',
-            'label': f'average gdp by continent ({year_start}-{year_end})',
-            'data': avg_by_continent(df, year_start, year_end)
-        })
-
-        # total global gdp trend for date range
-        results.append({
-            'type': 'global_trend',
-            'label': f'total global gdp trend ({year_start}-{year_end})',
-            'data': global_gdp_trend(df, year_start, year_end)
-        })
-
-        # fastest growing continent for date range
-        results.append({
-            'type': 'fastest_continent',
-            'label': f'fastest growing continent ({year_start}-{year_end})',
-            'data': fastest_continent(df, year_start, year_end)
-        })
-
-        # countries with consistent gdp decline in last x years
-        results.append({
-            'type': 'declining',
-            'label': f'countries with consistent gdp decline (last {decline_years} years)',
-            'data': declining_countries(df, continent, decline_years)
-        })
-
-        # contribution of each continent to global gdp for date range
-        results.append({
-            'type': 'contribution',
-            'label': f'continent contribution to global gdp ({year_start}-{year_end})',
-            'data': continent_contribution(df, year_start, year_end)
-        })
-
-        # write results to sink
-        self.sink.write(results)
-
-def top_10(df, continent, year):
-    sub = df[(df['Region'] == continent) & (df['Year'] == year)].dropna(subset=['Value'])
-    sub = sub.sort_values('Value', ascending=False).head(10)
-    return dict(zip(sub['Country Name'], sub['Value']))
+            if verify_packet(packet, key, iterations, hash_name):
+                self.verified_queue.put(packet)
+            # fake packets just get dropped silently
 
 
-def bottom_10(df, continent, year):
-    sub = df[(df['Region'] == continent) & (df['Year'] == year)].dropna(subset=['Value'])
-    sub = sub.sort_values('Value', ascending=True).head(10)
-    return dict(zip(sub['Country Name'], sub['Value']))
+# gather node - waits for all workers then computes running average
+class Aggregator:
+    def __init__(self, verified_queue, processed_queue, cfg, n_workers):
+        self.verified_queue = verified_queue
+        self.processed_queue = processed_queue
+        self.cfg = cfg
+        self.n_workers = n_workers
 
+    def run(self):
+        window_size = self.cfg['processing']['stateful_tasks']['running_average_window_size']
 
-def growth_rate(df, continent, year_start, year_end):
-    sub = df[df['Region'] == continent]
+        # imperative shell owns the mutable window state
+        window = deque(maxlen=window_size)
+        done_count = 0
 
-    start = sub[sub['Year'] == year_start].set_index('Country Name')['Value']
-    end = sub[sub['Year'] == year_end].set_index('Country Name')['Value']
+        while True:
+            packet = self.verified_queue.get()
 
-    joined = start.to_frame('start').join(end.to_frame('end'), how='inner')
-    joined = joined[joined['start'] > 0]
+            if packet is None:
+                done_count += 1
+                if done_count >= self.n_workers:  # all workers finished
+                    self.processed_queue.put(None)
+                    break
+                continue
 
-    countries = joined.index.tolist()
+            window.append(packet['metric_value'])
 
-    # functional map over countries to compute rates
-    rates = list(map(
-        lambda c: round(((joined.loc[c, 'end'] - joined.loc[c, 'start']) / joined.loc[c, 'start']) * 100, 2),
-        countries
-    ))
+            # functional core - pure avg from window snapshot
+            avg = compute_average(window)
 
-    return dict(zip(countries, rates))
-
-
-def avg_by_continent(df, year_start, year_end):
-    sub = df[(df['Year'] >= year_start) & (df['Year'] <= year_end)]
-    if sub.empty:
-        return {}
-    means = sub.groupby('Region')['Value'].mean().round(2).to_dict()
-    return means
-
-
-def global_gdp_trend(df, year_start, year_end):
-    sub = df[(df['Year'] >= year_start) & (df['Year'] <= year_end)]
-    if sub.empty:
-        return {}
-    sums = sub.groupby('Year')['Value'].sum().round(2)
-    return {int(year): float(sums.loc[year]) for year in sums.index}
-
-
-def fastest_continent(df, year_start, year_end):
-    sub = df[(df['Year'] >= year_start) & (df['Year'] <= year_end)]
-    continents = sub['Region'].dropna().unique().tolist()
-
-    def continent_growth(r):
-        s = sub[(sub['Region'] == r) & (sub['Year'] == year_start)]['Value'].sum()
-        e = sub[(sub['Region'] == r) & (sub['Year'] == year_end)]['Value'].sum()
-        return round(((e - s) / s) * 100, 2) if s != 0 else 0
-
-    # functional map over continents
-    growth_dict = dict(zip(continents, map(continent_growth, continents)))
-
-    fastest = max(growth_dict, key=lambda k: growth_dict[k]) if growth_dict else None
-
-    return {'fastest': fastest, 'growth_rates': growth_dict}
-
-
-def declining_countries(df, continent, n_years):
-    # list countries that show a strict decline each year for the last n years
-    sub = df[df['Region'] == continent]
-    if sub.empty:
-        return []
-
-    max_year = int(sub['Year'].max())
-    years = list(range(max_year - n_years + 1, max_year + 1))
-    countries = sub['Country Name'].dropna().unique().tolist()
-
-    def is_declining(country):
-        vals = list(map(
-            lambda y: sub[(sub['Country Name'] == country) & (sub['Year'] == y)]['Value'].values,
-            years
-        ))
-
-        vals_flat = list(filter(lambda v: len(v) > 0, vals))
-        if len(vals_flat) < n_years:
-            return False
-
-        nums = list(map(lambda v: v[0], vals_flat))
-
-        # check strict decline using all and map
-        return all(map(lambda p: p[1] < p[0], zip(nums, nums[1:])))
-
-    return list(filter(is_declining, countries))
-
-
-def continent_contribution(df, year_start, year_end):
-    sub = df[(df['Year'] >= year_start) & (df['Year'] <= year_end)]
-    if sub.empty:
-        return {}
-    total = sub['Value'].sum()
-    if total == 0:
-        continents = sub['Region'].dropna().unique().tolist()
-        return {r: 0.0 for r in continents}
-    parts = sub.groupby('Region')['Value'].sum().to_dict()
-    result = {r: round((parts.get(r, 0) / total) * 100, 2) for r in parts}
-    return result
+            self.processed_queue.put({**packet, 'computed_metric': avg})
