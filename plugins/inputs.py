@@ -1,57 +1,48 @@
 import pandas as pd
-import json
-import re
-from core.contracts import PipelineService
+import time
 
 
-class CSVReader:
-    def __init__(self, service: PipelineService, path: str):
-        self.service = service
-        self.path = path
+class GenericCSVReader:
+    def __init__(self, raw_queue, cfg):
+        self.raw_queue = raw_queue
+        self.cfg = cfg
 
     def run(self):
-        df = pd.read_csv(self.path)
+        path   = self.cfg['dataset_path']
+        schema = self.cfg['schema_mapping']
+        delay  = self.cfg['pipeline_dynamics']['input_delay_seconds']
 
-        raw_data = df.to_dict(orient='records')
-        self.service.execute(raw_data)
+        df = pd.read_csv(path)
 
+        # map source column names to internal generic names
+        col_map  = {c['source_name']: c['internal_mapping'] for c in schema['columns']}
+        type_map = {c['internal_mapping']: c['data_type']   for c in schema['columns']}
 
-class JSONReader:
-    def __init__(self, service: PipelineService, path: str):
-        self.service = service
-        self.path = path
+        existing = [c for c in col_map if c in df.columns]
+        df = df[existing].rename(columns=col_map)
 
-    def run(self):
-        with open(self.path, 'r') as f:
-            text = f.read()
+        # cast_map defines the conversion for each supported type
+        # string columns are excluded naturally since 'string' has no entry here
+        cast_map = {
+            'integer': lambda s: pd.to_numeric(s, errors='coerce').fillna(0).astype(int),
+            'float':   lambda s: pd.to_numeric(s, errors='coerce'),
+        }
 
-        text = re.sub(r'\bNaN\b', 'null', text)
+        # apply all type casts in one shot using assign + dict comprehension - no explicit loop
+        df = df.assign(**{
+            col: cast_map[dtype](df[col])
+            for col, dtype in type_map.items()
+            if col in df.columns and dtype in cast_map
+        })
 
-        text = re.sub(r'#@\$!\\', 'null', text)
+        df = df.dropna(subset=['metric_value'])
 
-        raw_json = json.loads(text)
+        # use to_dict not iterrows - iterrows silently upcasts ints to floats
+        records = df.to_dict('records')
 
-        df = pd.DataFrame(raw_json)
+        # push packets one by one - queue blocks naturally if full (backpressure)
+        list(map(lambda packet: (self.raw_queue.put(packet), time.sleep(delay)), records))
 
-        # convert wide format to long format
-        id_vars = ['Country Name', 'Country Code', 'Indicator Name', 'Indicator Code', 'Continent']
-        year_cols = [col for col in df.columns if str(col).isdigit()]
-
-        df_long = pd.melt(
-            df,
-            id_vars=id_vars,
-            value_vars=year_cols,
-            var_name='Year',
-            value_name='Value'
-        )
-
-        # rename and select columns
-        df_long = df_long.rename(columns={'Continent': 'Region'})
-        df_long = df_long[['Country Name', 'Region', 'Year', 'Value']]
-
-        # remove missing values
-        df_long = df_long.dropna(subset=['Value'])
-
-        # convert to records and execute pipeline
-        raw_data = df_long.to_dict(orient='records')
-        self.service.execute(raw_data)
+        # one sentinel per worker so each knows when to stop
+        n_workers = self.cfg['pipeline_dynamics']['core_parallelism']
+        list(map(lambda _: self.raw_queue.put(None), range(n_workers)))

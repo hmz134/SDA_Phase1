@@ -29,6 +29,7 @@
     <Compile Include="Modules\dataProcessor.py" />
     <Compile Include="Modules\data_loader.py" />
     <Compile Include="Modules\dashboard.py" />
+    <Compile Include="telemetry.py" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Modules\" />
@@ -38,6 +39,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="data\gdp_with_continent_filled.xlsx" />
+    <Content Include="data\sample_sensor_data.csv" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in
