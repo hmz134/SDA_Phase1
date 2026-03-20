@@ -6,6 +6,7 @@
     "stream_queue_max_size": 20
   },
   "schema_mapping": {
+    "target_entity": "Sensor",
     "columns": [
       {
         "source_name": "Sensor_ID",

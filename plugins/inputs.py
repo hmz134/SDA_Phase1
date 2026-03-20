@@ -8,24 +8,24 @@ class GenericCSVReader:
         self.cfg = cfg
 
     def run(self):
-        path   = self.cfg['dataset_path']
+        path = self.cfg['dataset_path']
         schema = self.cfg['schema_mapping']
-        delay  = self.cfg['pipeline_dynamics']['input_delay_seconds']
+        delay = self.cfg['pipeline_dynamics']['input_delay_seconds']
 
         df = pd.read_csv(path)
 
         # map source column names to internal generic names
-        col_map  = {c['source_name']: c['internal_mapping'] for c in schema['columns']}
+        col_map = {c['source_name']: c['internal_mapping'] for c in schema['columns']}
         type_map = {c['internal_mapping']: c['data_type']   for c in schema['columns']}
 
         existing = [c for c in col_map if c in df.columns]
         df = df[existing].rename(columns=col_map)
 
         # cast_map defines the conversion for each supported type
-        # string columns are excluded naturally since 'string' has no entry here
+        # string columns are excluded
         cast_map = {
             'integer': lambda s: pd.to_numeric(s, errors='coerce').fillna(0).astype(int),
-            'float':   lambda s: pd.to_numeric(s, errors='coerce'),
+            'float': lambda s: pd.to_numeric(s, errors='coerce'),
         }
 
         # apply all type casts in one shot using assign + dict comprehension - no explicit loop

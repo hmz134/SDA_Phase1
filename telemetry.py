@@ -3,11 +3,11 @@
 class PipelineTelemetry:
 
     def __init__(self, raw_queue, verified_queue, processed_queue, max_size):
-        self.raw_queue       = raw_queue
-        self.verified_queue  = verified_queue
+        self.raw_queue = raw_queue
+        self.verified_queue = verified_queue  # may be None in 2 queue mode
         self.processed_queue = processed_queue
-        self.max_size        = max_size
-        self._observers      = []
+        self.max_size = max_size
+        self._observers = []
 
     def attach(self, observer):
         self._observers.append(observer)
@@ -17,9 +17,11 @@ class PipelineTelemetry:
 
     def poll(self):
         try:
-            sizes = list(map(lambda q: q.qsize(),
-                             (self.raw_queue, self.verified_queue, self.processed_queue)))
+            raw_s = self.raw_queue.qsize()
+            ver_s = self.verified_queue.qsize() if self.verified_queue is not None else 0
+            proc_s = self.processed_queue.qsize()
+            sizes = [raw_s, ver_s, proc_s]
         except Exception:
-            sizes = [0, 0, 0]
+            sizes = [0,0, 0]
 
         list(map(lambda obs: obs.update(*sizes, self.max_size), self._observers))

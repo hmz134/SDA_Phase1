@@ -32,12 +32,15 @@
     <Compile Include="telemetry.py" />
   </ItemGroup>
   <ItemGroup>
+    <Folder Include="architecture\" />
     <Folder Include="Modules\" />
     <Folder Include="data\" />
     <Folder Include="core\" />
     <Folder Include="plugins\" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="architecture\classDiagram.png" />
+    <Content Include="architecture\SequenceDiagram.png" />
     <Content Include="data\gdp_with_continent_filled.xlsx" />
     <Content Include="data\sample_sensor_data.csv" />
   </ItemGroup>
